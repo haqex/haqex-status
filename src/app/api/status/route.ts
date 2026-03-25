@@ -1,30 +1,8 @@
 import { NextResponse } from "next/server";
-import type {
-  ServiceStatus,
-  StatusResponse,
-  GitHubRepoStatus,
-  NpmPackageStatus,
-  VercelProjectStatus,
-} from "@/config/services";
+import type { ServiceStatus, StatusResponse } from "@/config/services";
+import { checkAllGitHub, checkAllNpm, checkAllVercel } from "@/lib/checks";
 
 export const revalidate = 60;
-
-function getBaseUrl() {
-  if (process.env.VERCEL_URL) return `https://${process.env.VERCEL_URL}`;
-  return "http://localhost:3000";
-}
-
-async function fetchInternal<T>(path: string): Promise<T[]> {
-  try {
-    const res = await fetch(`${getBaseUrl()}/api/status/${path}`, {
-      next: { revalidate: 60 },
-    });
-    if (!res.ok) return [];
-    return res.json();
-  } catch {
-    return [];
-  }
-}
 
 function deriveOverall(statuses: ServiceStatus[]): ServiceStatus {
   if (statuses.some((s) => s === "outage")) return "outage";
@@ -35,9 +13,9 @@ function deriveOverall(statuses: ServiceStatus[]): ServiceStatus {
 
 export async function GET() {
   const [github, npm, vercel] = await Promise.all([
-    fetchInternal<GitHubRepoStatus>("github"),
-    fetchInternal<NpmPackageStatus>("npm"),
-    fetchInternal<VercelProjectStatus>("vercel"),
+    checkAllGitHub(),
+    checkAllNpm(),
+    checkAllVercel(),
   ]);
 
   const allStatuses: ServiceStatus[] = [
