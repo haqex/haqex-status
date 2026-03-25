@@ -7,7 +7,7 @@ import {
 
 export const revalidate = 120;
 
-const VERCEL_TOKEN = process.env.VERCEL_TOKEN;
+const VERCEL_TOKEN = process.env.HAQEX_VERCEL_TOKEN;
 const VERCEL_TEAM_ID = process.env.VERCEL_TEAM_ID;
 
 async function fetchVercel(path: string) {
