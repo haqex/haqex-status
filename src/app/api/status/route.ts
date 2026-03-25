@@ -1,59 +1,58 @@
 import { NextResponse } from "next/server";
-import { services, type ServiceWithStatus, type ServiceStatus } from "@/config/services";
+import type {
+  ServiceStatus,
+  StatusResponse,
+  GitHubRepoStatus,
+  NpmPackageStatus,
+  VercelProjectStatus,
+} from "@/config/services";
 
-export const revalidate = 60; // revalidate every 60 seconds
+export const revalidate = 60;
 
-async function checkService(service: (typeof services)[number]): Promise<ServiceWithStatus> {
-  const start = Date.now();
-  let status: ServiceStatus = "operational";
-  let responseTime: number | null = null;
+function getBaseUrl() {
+  if (process.env.VERCEL_URL) return `https://${process.env.VERCEL_URL}`;
+  return "http://localhost:3000";
+}
 
+async function fetchInternal<T>(path: string): Promise<T[]> {
   try {
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 10000);
-
-    const res = await fetch(service.url, {
-      method: "HEAD",
-      signal: controller.signal,
-      redirect: "follow",
+    const res = await fetch(`${getBaseUrl()}/api/status/${path}`, {
+      next: { revalidate: 60 },
     });
-
-    clearTimeout(timeout);
-    responseTime = Date.now() - start;
-
-    if (res.status >= 500) {
-      status = "outage";
-    } else if (res.status >= 400) {
-      status = "degraded";
-    } else if (responseTime > 3000) {
-      status = "degraded";
-    }
+    if (!res.ok) return [];
+    return res.json();
   } catch {
-    status = "outage";
-    responseTime = null;
+    return [];
   }
+}
 
-  return {
-    ...service,
-    status,
-    responseTime,
-    lastChecked: new Date().toISOString(),
-  };
+function deriveOverall(statuses: ServiceStatus[]): ServiceStatus {
+  if (statuses.some((s) => s === "outage")) return "outage";
+  if (statuses.some((s) => s === "degraded")) return "degraded";
+  if (statuses.some((s) => s === "maintenance")) return "maintenance";
+  return "operational";
 }
 
 export async function GET() {
-  const results = await Promise.all(services.map(checkService));
+  const [github, npm, vercel] = await Promise.all([
+    fetchInternal<GitHubRepoStatus>("github"),
+    fetchInternal<NpmPackageStatus>("npm"),
+    fetchInternal<VercelProjectStatus>("vercel"),
+  ]);
 
-  const allOperational = results.every((s) => s.status === "operational");
-  const hasOutage = results.some((s) => s.status === "outage");
+  const allStatuses: ServiceStatus[] = [
+    ...github.map((g) => g.status),
+    ...npm.map((n) => n.status),
+    ...vercel.map((v) => v.status),
+  ];
 
-  let overallStatus: ServiceStatus = "operational";
-  if (hasOutage) overallStatus = "outage";
-  else if (!allOperational) overallStatus = "degraded";
-
-  return NextResponse.json({
-    overallStatus,
-    services: results,
+  const response: StatusResponse = {
+    overallStatus: deriveOverall(allStatuses),
     lastUpdated: new Date().toISOString(),
-  });
+    github,
+    npm,
+    vercel,
+  };
+
+  return NextResponse.json(response);
 }
